@@ -33,6 +33,14 @@ description() ->
 
 %%--------------------------------------------------------------------
 
+%% *********************************************************************
+%% *  User Authorization Callback Implementation
+%% *  Routes the user and token (sent trough the password field)
+%% *  trough the oauth check endpoint, and stores the token in
+%% *  the user record field `impl` to be able to access it later
+%% *  in the resource authorization step
+%% *********************************************************************
+
 check_user_login(Username, AuthProps) ->
     {password, Token} = lists:nth(1, AuthProps),
     case oauth_check_token(Username, Token) of
@@ -44,8 +52,22 @@ check_user_login(Username, AuthProps) ->
         Other           -> {error, {bad_response, Other}}
     end.
 
+%% *********************************************************************
+%% *  VHost Authorization Callback Implementation
+%% *  Not really doing anything here...
+%% *********************************************************************
+
 check_vhost_access(#user{username = _Username}, _VHost) ->
     true.
+
+%% *********************************************************************
+%% *  Resource Authorization Callback Implementation
+%% *  Grant/check acces on all permissions to:
+%% *  - `new` exchange
+%% *  - Conversation exchanges
+%% *  - Dynamically created queues
+%% *  Deny access to everything else
+%% *********************************************************************
 
 check_resource_access(#user{username = Username, impl = Token},
                       #resource{kind = Type, name = Name},
@@ -66,11 +88,26 @@ check_resource_access(#user{username = Username, impl = Token},
 
 %%--------------------------------------------------------------------
 
+%% *********************************************************************
+%% *  Authorizes given user and token
+%% *  trough the designated oauth server.
+%% *  Returns true on valid token
+%% *********************************************************************
+
 oauth_check_token(OUsername, OToken) ->
     Params = [{scope,        "widgetcli"},
               {username,     OUsername},
               {access_token, OToken}],
-    http_post(q(oauth_server, Params)).
+    {ok, OAuthServerBaseURL} = application:get_env(rabbitmq_auth_backend_max, oauth_server),
+    OAuthServer = OAuthServerBaseURL ++ "/checktoken",
+    http_post(q(OAuthServer, Params), []).
+
+%% *********************************************************************
+%% *  Authorizes given user on a given conversation
+%% *  identified by the conected exchange
+%% *  Checks that the exchange name is a valid Mongo ID
+%% *  Otherwise asume that this is another exchange, and deny access
+%% *********************************************************************
 
 check_user_can_access_conversation_exchange(UserName, OAuthToken, ExchangeName) ->
     RegExp = "^[a-f0-9]{24}$",
@@ -78,6 +115,12 @@ check_user_can_access_conversation_exchange(UserName, OAuthToken, ExchangeName) 
         nomatch            -> false;
         _                  -> max_get_conversation(UserName, OAuthToken, ExchangeName)
     end.
+
+
+%% *********************************************************************
+%% *  Gets the response of trying to get a conversation's data
+%% *  Prepare the endpoint url and headers and make the GET request
+%% *********************************************************************
 
 max_get_conversation(User, Token, ConversationID) ->
   {ok, MaxServerBase} = application:get_env(rabbitmq_auth_backend_max, max_server),
@@ -89,6 +132,11 @@ max_get_conversation(User, Token, ConversationID) ->
   http_get(ConversationsEndpoint, Headers).
 
 %%--------------------------------------------------------------------
+
+%% *********************************************************************
+%% *  Performs a GET request with optional custom headers
+%% *  Returns true or false indicating the success code of the request
+%% *********************************************************************
 
 http_get(Path, Headers) ->
     URI = uri_parser:parse(Path, [{port, 80}]),
@@ -105,13 +153,18 @@ http_get(Path, Headers) ->
             E
     end.
 
-http_post(Path) ->
+%% *********************************************************************
+%% *  Performs a POST request with optional custom headers
+%% *  Returns true or false indicating the success code of the request
+%% *********************************************************************
+
+http_post(Path, Headers) ->
     ssl:start(),
     URI = uri_parser:parse(Path, [{port, 80}]),
     {host, Host} = lists:keyfind(host, 1, URI),
     {port, Port} = lists:keyfind(port, 1, URI),
     HostHdr = rabbit_misc:format("~s:~b", [Host, Port]),
-    case httpc:request(post, {Path, [{"Host", HostHdr}], "application/text", "." }, ?HTTPC_OPTS, []) of
+    case httpc:request(post, {Path, Headers ++ [{"Host", HostHdr}], "application/text", "." }, ?HTTPC_OPTS, []) of
         {ok, {{_HTTP, Code, _}, _Headers, _Body}} ->
             case Code of
                 200 -> true;
@@ -121,8 +174,11 @@ http_post(Path) ->
             E
     end.
 
-q(PathName, Args) ->
-    {ok, Path} = application:get_env(rabbitmq_auth_backend_max, PathName),
+%% *********************************************************************
+%% *  Constructs s query string out of a list of parameters
+%% *********************************************************************
+
+q(Path, Args) ->
     R = Path ++ "?" ++ string:join([escape(K, V) || {K, V} <- Args], "&"),
     %%io:format("Q: ~p~n", [R]),
     R.
