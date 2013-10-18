@@ -14,7 +14,7 @@
 %% Copyright (c) 2007-2011 VMware, Inc.  All rights reserved.
 %%
 
--module(rabbit_auth_backend_http_app).
+-module(rabbit_auth_backend_max_app).
 
 -behaviour(application).
 -export([start/2, stop/1]).
