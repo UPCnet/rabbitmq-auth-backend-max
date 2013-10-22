@@ -43,7 +43,8 @@ description() ->
 
 check_user_login(Username, AuthProps) ->
     {password, Token} = lists:nth(1, AuthProps),
-    case oauth_check_token(Username, Token) of
+    io:format("Q: ~p~n", [AuthProps]),
+    case oauth_check_token(binary_to_list(Username), Token) of
         false            -> {refused, "Denied by HTTP plugin", []};
         true           -> {ok, #user{username     = Username,
                                       tags         = [],
@@ -95,12 +96,14 @@ check_resource_access(#user{username = Username, impl = Token},
 %% *********************************************************************
 
 oauth_check_token(OUsername, OToken) ->
-    Params = [{scope,        "widgetcli"},
-              {username,     OUsername},
-              {access_token, OToken}],
+    {DomainPath, Username} = extract_domain_and_user_from_auth(OUsername),
     {ok, OAuthServerBaseURL} = application:get_env(rabbitmq_auth_backend_max, oauth_server),
-    OAuthServer = OAuthServerBaseURL ++ "/checktoken",
+    Params = [{scope,        "widgetcli"},
+              {username,     Username},
+              {access_token, OToken}],
+    OAuthServer = OAuthServerBaseURL ++ DomainPath ++ "/checktoken",
     http_post(q(OAuthServer, Params), []).
+
 
 %% *********************************************************************
 %% *  Authorizes given user on a given conversation
@@ -123,15 +126,30 @@ check_user_can_access_conversation_exchange(UserName, OAuthToken, ExchangeName) 
 %% *********************************************************************
 
 max_get_conversation(User, Token, ConversationID) ->
+  {DomainPath, Username} = extract_domain_and_user_from_auth(User),
   {ok, MaxServerBase} = application:get_env(rabbitmq_auth_backend_max, max_server),
-  ConversationsEndpoint = MaxServerBase ++ "/conversations/" ++ ConversationID,
+  ConversationsEndpoint = MaxServerBase ++ DomainPath ++ "/conversations/" ++ ConversationID,
+  io:format("Q: ~p~n", [ConversationsEndpoint]),
   Headers = [
     {"X-Oauth-Scope", "widgetcli"},
     {"X-Oauth-Token", Token},
-    {"X-Oauth-Username", User}],
+    {"X-Oauth-Username", Username}],
+  io:format("Q: ~p~n", [Headers]),
   http_get(ConversationsEndpoint, Headers).
 
-%%--------------------------------------------------------------------
+%% *********************************************************************
+%% *  Extracts the domain:user data in the received username
+%% *  and constructs the domain path if present
+%% *********************************************************************
+
+extract_domain_and_user_from_auth(UserDomain) ->
+    RegExp = "(?:([^:]+):)*(.*)",
+    {match, [_, {Dstart, Dend}, {Nstart, _Nend}]} = re:run(UserDomain, RegExp),
+    case Dstart of
+        -1      -> DomainPath = "";
+        _       -> DomainPath = "/" ++ string:substr(UserDomain, Dstart+1, Dend)
+    end,
+    {DomainPath, string:substr(UserDomain, Nstart+1)}.
 
 %% *********************************************************************
 %% *  Performs a GET request with optional custom headers
