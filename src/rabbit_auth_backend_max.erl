@@ -19,7 +19,7 @@
 -include_lib("rabbit_common/include/rabbit.hrl").
 -behaviour(rabbit_auth_backend).
 
--export([description/0, q/2]).
+-export([description/0, q/1]).
 -export([check_user_login/2, check_vhost_access/2, check_resource_access/3]).
 
 %% httpc seems to get racy when using HTTP 1.1
@@ -43,8 +43,9 @@ description() ->
 
 check_user_login(Username, AuthProps) ->
     {password, Token} = lists:nth(1, AuthProps),
-    io:format("Q: ~p~n", [AuthProps]),
-    case oauth_check_token(binary_to_list(Username), Token) of
+    %% Echoes login info
+    %% io:format("Q: ~p~n", [AuthProps]),
+    case oauth_check_token(binary_to_list(Username), binary_to_list(Token)) of
         false            -> {refused, "Denied by HTTP plugin", []};
         true           -> {ok, #user{username     = Username,
                                       tags         = [],
@@ -75,7 +76,6 @@ check_resource_access(#user{username = Username, impl = Token},
                       _Permission) ->
     SName = binary_to_list(Name),
     SUsername = binary_to_list(Username),
-    SToken = binary_to_list(Token),
     SubscribeExchange = SUsername ++ ".subscribe",
     PublishExchange = SUsername ++ ".publish",
     case Type of
@@ -105,7 +105,7 @@ oauth_check_token(OUsername, OToken) ->
               {username,     Username},
               {access_token, OToken}],
     OAuthServer = OAuthServerBaseURL ++ DomainPath ++ "/checktoken",
-    http_post(q(OAuthServer, Params), []).
+    http_post(OAuthServer, [], q(Params)).
 
 
 %% *********************************************************************
@@ -115,12 +115,12 @@ oauth_check_token(OUsername, OToken) ->
 %% *  Otherwise asume that this is another exchange, and deny access
 %% *********************************************************************
 
-check_user_can_access_conversation_exchange(UserName, OAuthToken, ExchangeName) ->
-    RegExp = "^[a-f0-9]{24}$",
-    case re:run(ExchangeName, RegExp) of
-        nomatch            -> false;
-        _                  -> max_get_conversation(UserName, OAuthToken, ExchangeName)
-    end.
+% check_user_can_access_conversation_exchange(UserName, OAuthToken, ExchangeName) ->
+%     RegExp = "^[a-f0-9]{24}$",
+%     case re:run(ExchangeName, RegExp) of
+%         nomatch            -> false;
+%         _                  -> max_get_conversation(UserName, OAuthToken, ExchangeName)
+%     end.
 
 
 %% *********************************************************************
@@ -128,17 +128,16 @@ check_user_can_access_conversation_exchange(UserName, OAuthToken, ExchangeName) 
 %% *  Prepare the endpoint url and headers and make the GET request
 %% *********************************************************************
 
-max_get_conversation(User, Token, ConversationID) ->
-  {DomainPath, Username} = extract_domain_and_user_from_auth(User),
-  {ok, MaxServerBase} = application:get_env(rabbitmq_auth_backend_max, max_server),
-  ConversationsEndpoint = MaxServerBase ++ DomainPath ++ "/conversations/" ++ ConversationID,
-  io:format("Q: ~p~n", [ConversationsEndpoint]),
-  Headers = [
-    {"X-Oauth-Scope", "widgetcli"},
-    {"X-Oauth-Token", Token},
-    {"X-Oauth-Username", Username}],
-  io:format("Q: ~p~n", [Headers]),
-  http_get(ConversationsEndpoint, Headers).
+% max_get_conversation(User, Token, ConversationID) ->
+%   {DomainPath, Username} = extract_domain_and_user_from_auth(User),
+%   {ok, MaxServerBase} = application:get_env(rabbitmq_auth_backend_max, max_server),
+%   ConversationsEndpoint = MaxServerBase ++ DomainPath ++ "/conversations/" ++ ConversationID,
+%   io:format("Q: ~p~n", [ConversationsEndpoint]),
+%   Headers = [
+%     {"X-Oauth-Scope", "widgetcli"},
+%     {"X-Oauth-Token", Token},
+%     {"X-Oauth-Username", Username}],
+%   http_get(ConversationsEndpoint, Headers).
 
 %% *********************************************************************
 %% *  Extracts the domain:user data in the received username
@@ -159,34 +158,37 @@ extract_domain_and_user_from_auth(UserDomain) ->
 %% *  Returns true or false indicating the success code of the request
 %% *********************************************************************
 
-http_get(Path, Headers) ->
-    URI = uri_parser:parse(Path, [{port, 80}]),
-    {host, Host} = lists:keyfind(host, 1, URI),
-    {port, Port} = lists:keyfind(port, 1, URI),
-    HostHdr = rabbit_misc:format("~s:~b", [Host, Port]),
-    case httpc:request(get, {Path, Headers ++ [{"Host", HostHdr}]}, ?HTTPC_OPTS, []) of
-        {ok, {{_HTTP, Code, _}, _Headers, _Body}} ->
-            case Code of
-                200 -> true;
-                _   -> false
-            end;
-        {error, _} = E ->
-            E
-    end.
+% http_get(Path, Headers) ->
+%     URI = uri_parser:parse(Path, [{port, 80}]),
+%     {host, Host} = lists:keyfind(host, 1, URI),
+%     {port, Port} = lists:keyfind(port, 1, URI),
+%     HostHdr = rabbit_misc:format("~s:~b", [Host, Port]),
+%     case httpc:request(get, {Path, Headers ++ [{"Host", HostHdr}]}, ?HTTPC_OPTS, []) of
+%         {ok, {{_HTTP, Code, _}, _Headers, _Body}} ->
+%             case Code of
+%                 200 -> true;
+%                 _   -> false
+%             end;
+%         {error, _} = E ->
+%             E
+%     end.
 
 %% *********************************************************************
 %% *  Performs a POST request with optional custom headers
 %% *  Returns true or false indicating the success code of the request
 %% *********************************************************************
 
-http_post(Path, Headers) ->
+http_post(Path, Headers, Body) ->
     ssl:start(),
     URI = uri_parser:parse(Path, [{port, 80}]),
     {host, Host} = lists:keyfind(host, 1, URI),
     {port, Port} = lists:keyfind(port, 1, URI),
     HostHdr = rabbit_misc:format("~s:~b", [Host, Port]),
-    case httpc:request(post, {Path, Headers ++ [{"Host", HostHdr}], "application/text", "." }, ?HTTPC_OPTS, []) of
+    case httpc:request(post, {Path, Headers ++ [{"Host", HostHdr}], "application/x-www-form-urlencoded", Body }, ?HTTPC_OPTS, []) of
         {ok, {{_HTTP, Code, _}, _Headers, _Body}} ->
+            %% Echoes response code and body
+            %% io:format("Q: ~p~n", [Code]),
+            %% io:format("Q: ~p~n", [_Body]),
             case Code of
                 200 -> true;
                 _   -> false
@@ -199,8 +201,8 @@ http_post(Path, Headers) ->
 %% *  Constructs s query string out of a list of parameters
 %% *********************************************************************
 
-q(Path, Args) ->
-    R = Path ++ "?" ++ string:join([escape(K, V) || {K, V} <- Args], "&"),
+q(Args) ->
+    R = string:join([escape(K, V) || {K, V} <- Args], "&"),
     %%io:format("Q: ~p~n", [R]),
     R.
 
