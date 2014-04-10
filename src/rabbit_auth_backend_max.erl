@@ -76,10 +76,13 @@ check_resource_access(#user{username = Username, impl = Token},
     SName = binary_to_list(Name),
     SUsername = binary_to_list(Username),
     SToken = binary_to_list(Token),
+    SubscribeExchange = SUsername ++ ".subscribe",
+    PublishExchange = SUsername ++ ".publish",
     case Type of
         exchange -> case SName of
-                        "new"       -> true;
-                        _           -> check_user_can_access_conversation_exchange(SUsername, SToken, SName)
+                        SubscribeExchange       -> true;
+                        PublishExchange         -> true;
+                        _                       -> false
                     end;
         queue    -> case string:substr(SName, 1, 7) of
                         "amq.gen"    -> true;
