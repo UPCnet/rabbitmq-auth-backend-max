@@ -101,9 +101,17 @@ check_resource_access(#user{username = Username, impl = Token},
 oauth_check_token(OUsername, OToken) ->
     {DomainPath, Username} = extract_domain_and_user_from_auth(OUsername),
     {ok, OAuthServerBaseURL} = application:get_env(rabbitmq_auth_backend_max, oauth_server),
-    Params = [{scope,        "widgetcli"},
-              {username,     Username},
-              {access_token, OToken}],
+    StandardParams = [{scope,        "widgetcli"},
+                      {username,     Username},
+                      {access_token, OToken}],
+    PHPDMParams = [{scope,       "widgetcli"},
+                   {user_id,     Username},
+                   {oauth_token, OToken}],
+    {ok, OauthStandard} = application:get_env(rabbitmq_auth_backend_max, oauth_standard),
+    case OauthStandard of
+        "true"         -> Params = StandardParams;
+        "false"        -> Params = PHPDMParams
+    end,
     OAuthServer = OAuthServerBaseURL ++ DomainPath ++ "/checktoken",
     http_post(OAuthServer, [], q(Params)).
 
