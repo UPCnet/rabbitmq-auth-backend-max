@@ -75,7 +75,8 @@ check_resource_access(#user{username = Username, impl = Token},
                       #resource{kind = Type, name = Name},
                       _Permission) ->
     SName = binary_to_list(Name),
-    SUsername = binary_to_list(Username),
+    {DomainPath, SUsername} = extract_domain_and_user_from_auth(binary_to_list(Username)),
+    %%SUsername = binary_to_list(SUsernameWithoutDomain),
     SubscribeExchange = SUsername ++ ".subscribe",
     PublishExchange = SUsername ++ ".publish",
     case Type of
