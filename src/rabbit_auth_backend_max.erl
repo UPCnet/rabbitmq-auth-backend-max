@@ -110,12 +110,15 @@ oauth_check_token(OUsername, OToken) ->
                    {oauth_token, OToken}],
     {ok, OauthStandard} = application:get_env(rabbitmq_auth_backend_max, oauth_standard),
     case OauthStandard of
-        "true"         -> Params = StandardParams;
-        "false"        -> Params = PHPDMParams
+        true         -> Params = StandardParams;
+        false        -> Params = PHPDMParams
     end,
     OAuthServer = OAuthServerBaseURL ++ DomainPath ++ "/checktoken",
-    http_post(OAuthServer, [], q(Params)).
-
+    case application:get_env(rabbitmq_auth_backend_max, oauth_passtrough) of
+        undefined      -> http_post(OAuthServer, [], q(Params));
+        {ok, false}  -> http_post(OAuthServer, [], q(Params));
+        {ok, true}   -> true
+    end.
 
 %% *********************************************************************
 %% *  Authorizes given user on a given conversation
