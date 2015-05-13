@@ -44,7 +44,8 @@ description() ->
 check_user_login(Username, AuthProps) ->
     {password, Token} = lists:nth(1, AuthProps),
     %% Echoes login info
-    %% io:format("Q: ~p~n", [AuthProps]),
+    %%io:format("Q: ~p~n", [Username]),
+    %%io:format("Q: ~p~n", [AuthProps]),
     case oauth_check_token(binary_to_list(Username), binary_to_list(Token)) of
         false            -> {refused, "Denied by HTTP plugin", []};
         true           -> {ok, #user{username     = Username,
